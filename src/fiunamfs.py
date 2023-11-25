@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 
+import logging
 import os
 import sys
-#import errno
+import errno
 import time
 from datetime import datetime
-from fusepy import FUSE, FuseOSError, Operations, fuse_get_context
+from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn
 
 def btoi(b):
     """
@@ -78,7 +79,7 @@ class FiUnamArchivo:
         ba.extend(self.fecha_modificacion.strftime("%Y%m%d%H%M%S").encode("us-ascii"))
         return bytes(ba)
 
-class FiUnamFS(Operations):
+class FiUnamFS(LoggingMixIn, Operations):
     etiqueta = ""
     cluster = 1024
     t_dir = 0
@@ -139,7 +140,6 @@ class FiUnamFS(Operations):
             elif raw_entrada[0] == 47: # Es una entrada vacía
                 self.entradas_vacias.add(i)
 
-class Dumy:
     # Sistema de archivos
     def access(self, path, mode):
         return self._existe(path) and not(mode & 1 == 1)
@@ -150,26 +150,26 @@ class Dumy:
     def chown(self, path, uid, gid):
         raise NotImplementedError()
 
-    def getattr(self, path, fh=None):
-        try:
-            print(path)
-            return {
-                "st_atime": 1,#time.mktime(self.entradas[self._existe(path)].fecha_modificacion.timetuple()),
-                "st_ctime": 1,#time.mktime(self.entradas[self._existe(path)].fecha_creacion.timetuple()),
-                "st_gid": os.getgid(),
-                "st_ino": 331,#self._existe(path),
-                "st_mode": 0o100666,
-                "st_mtime": 1,#time.mktime(self.entradas[self._existe(path)].fecha_modificacion.timetuple()),
-                "st_nlink": 1,
-                "st_size": 0,#self.entradas[self._existe(path)].tamano,
-                "st_uid": os.getuid()
-            }
-        except:
-            raise FileNotFoundError(path)
+#    def getattr(self, path, fh=None):
+#        inodo = self._existe(path)
+#        if not inodo:
+#            raise FuseOSError(errno.ENOENT)
+#        return dict(
+#            st_atime=time.mktime(self.entradas[self._existe(path)].fecha_modificacion.timetuple()),
+#            st_ctime=time.mktime(self.entradas[self._existe(path)].fecha_creacion.timetuple()),
+#            st_gid=os.getgid(),
+#            st_ino=self._existe(path),
+#            st_mode=0o100666,
+#            st_mtime=time.mktime(self.entradas[self._existe(path)].fecha_modificacion.timetuple()),
+#            st_nlink=1,
+#            st_size=0,#self.entradas[self._existe(path)].tamano,
+#            st_uid=os.getuid()
+#        )
 
     def readdir(self, path, fh):
         lista = [ ".", ".." ]
         for e in self.entradas.values():
+            print("readdir", e.nombre)
             lista.append(e.nombre)
         return lista
 
@@ -269,4 +269,5 @@ class Dumy:
     def fsync(self, path, fdatasync, fh):
         pass # No implementado, los cambios se realizan inmmediatamente
 
-#FUSE(FiUnamFS(sys.argv[1]), sys.argv[2], nothreads=True, foreground=True, allow_other=True)
+logging.basicConfig(level=logging.DEBUG)
+FUSE(FiUnamFS(sys.argv[1]), sys.argv[2], nothreads=True, foreground=True, allow_other=True)
