@@ -143,7 +143,7 @@ class FiUnamFS(LoggingMixIn, Operations):
 
     # Sistema de archivos
     def access(self, path, mode):
-        return self._existe(path) and not(mode & 1 == 1)
+        return bool(self._existe(path))
 
     def chmod(self, path, mode):
         raise NotImplementedError()
@@ -156,11 +156,13 @@ class FiUnamFS(LoggingMixIn, Operations):
         if path == "/":
             ahora = datetime.now()
             return dict(
-                st_mode=(stat.S_IFDIR|0o755),
+                st_mode=(stat.S_IRWXU|stat.S_IRWXG|stat.S_IRWXO|stat.S_IFDIR), # Todos los permisos, como en ntfs
                 st_ctime=time.mktime(ahora.timetuple()),
                 st_mtime=time.mktime(ahora.timetuple()),
                 st_atime=time.mktime(ahora.timetuple()),
-                st_nlink=2
+                st_nlink=2,
+                st_gid=os.getgid(),
+                st_uid=os.getuid()
             )
         elif inodo == None:
             raise FuseOSError(errno.ENOENT)
@@ -170,7 +172,7 @@ class FiUnamFS(LoggingMixIn, Operations):
                 st_ctime=time.mktime(self.entradas[inodo].fecha_creacion.timetuple()),
                 st_gid=os.getgid(),
                 st_ino=inodo,
-                st_mode=(stat.S_IRWXU|stat.S_IRWXG|stat.S_IRWXO|stat.S_IFREG), # Todos los permisos, como ntfs
+                st_mode=(stat.S_IRWXU|stat.S_IRWXG|stat.S_IRWXO|stat.S_IFREG), # Todos los permisos, como en ntfs
                 st_mtime=time.mktime(self.entradas[inodo].fecha_modificacion.timetuple()),
                 st_nlink=1,
                 st_size=self.entradas[inodo].tamano,
@@ -226,8 +228,15 @@ class FiUnamFS(LoggingMixIn, Operations):
         raise NotImplementedError()
 
     def utimens(self, path, times=None):
-        # Pero es solo implementar la actualización de hora...
-        raise NotImplementedError()
+        inodo = self._existe(path)
+        now = datetime.now()
+        if times:
+            mtime = datetime.utcfromtimestamp(times[0])
+        else:
+            mtime = now
+        self.entradas[inodo].fecha_modificacion = mtime
+        self.imagen.seek(self.cluster+64*inodo)
+        self.imagen.write(self.entradas[inodo].tobytes())
 
     # Archivos
     def open(self, path, flags):
@@ -242,9 +251,11 @@ class FiUnamFS(LoggingMixIn, Operations):
         if len(self.entradas_vacias):
             inodo_n = min(list(self.entradas_vacias))
             self.entradas_vacias.remove(inodo_n)
-            self.entradas[inodo_n] = FiUnamArchivo((path[:1], inodo_n))
+            self.entradas[inodo_n] = FiUnamArchivo((path[1:], inodo_n))
             self.imagen.seek(self.cluster+64*inodo_n)
             self.imagen.write(self.entradas[inodo_n].tobytes())
+            self.descriptores.append(inodo_n)
+            return len(self.descriptores) - 1
         else:
             raise OSError()
 
