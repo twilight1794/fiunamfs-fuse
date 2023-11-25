@@ -94,9 +94,7 @@ class FiUnamFS(LoggingMixIn, Operations):
             n = f[1:]
         else:
             n = f
-        print("Buscando ", n)
         for k, v in self.entradas.items():
-            print("Archivo ", v.nombre)
             if v.nombre == n:
                 return k
         return None
@@ -158,7 +156,7 @@ class FiUnamFS(LoggingMixIn, Operations):
         if path == "/":
             ahora = datetime.now()
             return dict(
-                st_mode=(stat.S_IFDIR | 0o755),
+                st_mode=(stat.S_IFDIR|0o755),
                 st_ctime=time.mktime(ahora.timetuple()),
                 st_mtime=time.mktime(ahora.timetuple()),
                 st_atime=time.mktime(ahora.timetuple()),
@@ -172,7 +170,7 @@ class FiUnamFS(LoggingMixIn, Operations):
                 st_ctime=time.mktime(self.entradas[inodo].fecha_creacion.timetuple()),
                 st_gid=os.getgid(),
                 st_ino=inodo,
-                st_mode=(stat.S_IFREG| 666),
+                st_mode=(stat.S_IRWXU|stat.S_IRWXG|stat.S_IRWXO|stat.S_IFREG), # Todos los permisos, como ntfs
                 st_mtime=time.mktime(self.entradas[inodo].fecha_modificacion.timetuple()),
                 st_nlink=1,
                 st_size=self.entradas[inodo].tamano,
@@ -282,4 +280,4 @@ class FiUnamFS(LoggingMixIn, Operations):
         pass # No implementado, los cambios se realizan inmmediatamente
 
 logging.basicConfig(level=logging.DEBUG)
-FUSE(FiUnamFS(sys.argv[1]), sys.argv[2], nothreads=True, foreground=True, allow_other=True)
+FUSE(FiUnamFS(sys.argv[1]), sys.argv[2], nothreads=True, foreground=True, allow_other=False)
