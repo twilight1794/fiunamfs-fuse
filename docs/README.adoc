@@ -1,0 +1,262 @@
+= Proyecto 3: (Micro) sistema de archivos
+
+:authors: Cruz Vargas Emilio <emilio.cruz.vargas123@gmail.com>, Garciliano Diaz Giovanni Alfredo <rapunzel@disroot.org>
+:doctype: book
+:icons: font
+:source-highlighter: pygments
+
+== Introducción
+
+Este documento proporciona la documentación para el tercer proyecto de la materia "Sistemas Operativos" impartida por el profesor Wolf Iszaevich Gunnar Eyal en la UNAM, Facultad de Ingeniería.
+
+== Estructura del Proyecto
+
+El proyecto se organiza de la siguiente manera:
+
+. `src/` - Código fuente
+. `docs/` - Documentación
+
+== Requisitos del Sistema
+
+Para ejecutar el proyecto, asegúrate de tener instalado lo siguiente:
+
+- Sistema operativo: Cualquier SO con FUSE y python3
+- Dependencias adicionales: la biblioteca fusepy (https://github.com/fusepy) (desde pypi, o en Debian, con el paquete `python3-fusepy`)
+
+== Ejecución
+`./fiunamfs.py [imagen] [punto de montaje]`
+
+== Código
+A continuación, se presenta un fragmento del código de implementación en Python. Este código define la estructura del sistema de archivos FiUnamFS y proporciona funciones para realizar operaciones básicas como acceso, lectura, escritura y eliminación de archivos. Consulta el código fuente completo para obtener detalles adicionales y comentarios.
+
+=== open
+
+La función open se encarga de abrir un archivo en el sistema de archivos FiUnamFS. Recibe la ruta del archivo (path) y las banderas (flags). Primero, verifica si el archivo existe en el sistema de archivos y devuelve el índice del descriptor de archivo si ya está abierto. Si no está abierto, agrega el índice del inodo al conjunto de descriptores (self.descriptores) y devuelve el nuevo índice.
+.Python
+----
+def open(self, path, flags):
+    inodo = self._existe(path)
+    try:
+        return self.descriptores.index(inodo)
+    except ValueError:
+        self.descriptores.append(inodo)
+        return len(self.descriptores) - 1
+
+----
+
+=== create
+
+La función create crea un nuevo archivo en el sistema de archivos FiUnamFS. Recibe la ruta del archivo (path), el modo (mode), y opcionalmente, la información de archivo (fi). Si hay inodos vacíos disponibles, elige el mínimo y crea una nueva entrada de archivo. Luego, actualiza el sistema de archivos y agrega el nuevo inodo al conjunto de descriptores.
+.Python
+----
+def create(self, path, mode, fi=None):
+    if len(self.entradas_vacias):
+        inodo_n = min(list(self.entradas_vacias))
+        self.entradas_vacias.remove(inodo_n)
+        self.entradas[inodo_n] = FiUnamArchivo((path[1:], inodo_n))
+        self.imagen.seek(self.cluster + 64 * inodo_n)
+        self.imagen.write(self.entradas[inodo_n].tobytes())
+        self.descriptores.append(inodo_n)
+        return len(self.descriptores) - 1
+    else:
+        raise OSError()
+----
+
+=== read
+
+La función read lee el contenido de un archivo en el sistema de archivos FiUnamFS. Recibe la ruta del archivo (path), la longitud (length), el desplazamiento (offset), y el identificador de archivo (fh). Lee el contenido desde el archivo según los parámetros y devuelve los datos leídos.
+.Python
+----
+def read(self, path, length, offset, fh):
+    inodo = self._existe(path)
+    self.imagen.seek(self.entradas[inodo].cluster_ini * self.cluster + (offset or 0))
+    return self.imagen.read(length or self.entradas[inodo].tamano)
+----
+
+=== write
+
+La función write es responsable de escribir datos en un archivo en FiUnamFS. Recibe la ruta del archivo (path), el búfer de datos (buf), el desplazamiento (offset), y el identificador de archivo (fh). Escribe el búfer en el archivo, actualiza el tamaño del archivo y devuelve la longitud de los datos escritos.
+.Python
+----
+def write(self, path, buf, offset, fh):
+    inodo = self._existe(path)
+    self.imagen.seek(self.entradas[inodo].cluster_ini * self.cluster + (offset or 0))
+    self.imagen.write(buf)
+    self.entradas[inodo].tamano += len(buf) + (offset or 0)
+    return len(buf)
+----
+
+=== truncate
+
+La función truncate ajusta la longitud de un archivo en FiUnamFS. Recibe la ruta del archivo (path), la nueva longitud (length), y opcionalmente, el identificador de archivo (fh). Si la nueva longitud es mayor que la actual, se añaden bytes. Si es menor, se truncan los bytes excedentes.
+.Python
+----
+def truncate(self, path, length, fh=None):
+    inodo = self._existe(path)
+    if length >= self.entradas[inodo].tamano:
+        dif = length - self.entradas[inodo].tamano
+        self.imagen.seek(self.entradas[inodo].cluster_ini * self.cluster + self.entradas[inodo].tamano)
+        self.imagen.write(bytes(dif))
+    else:
+        dif = self.entradas[inodo].tamano - length
+        self.imagen.seek(self.entradas[inodo].cluster_ini * self.cluster + length)
+    self.imagen.write(bytes(dif))
+    self.entradas[inodo].tamano = length
+
+----
+
+=== flush
+
+La función flush no está implementada y no realiza ninguna acción. Los cambios en FiUnamFS se realizan inmediatamente.
+.Python
+----
+def flush(self, path, fh):
+    pass
+----
+
+=== release
+
+La función release libera un descriptor de archivo en FiUnamFS. Recibe la ruta del archivo (path) y el identificador de archivo (fh). Elimina el inodo del conjunto de descriptores si está presente.
+.Python
+----
+def release(self, path, fh):
+    inodo = self._existe(path)
+    try:
+        self.descriptores.remove(inodo)
+    except ValueError:
+        pass
+----
+
+=== fsync
+
+La función fsync no está implementada y no realiza ninguna acción. Los cambios en FiUnamFS se realizan inmediatamente.
+.Python
+----
+def fsync(self, path, fdatasync, fh):
+    pass
+----
+
+=== getattr
+La función getattr se utiliza para obtener los atributos de un archivo o directorio en el sistema de archivos FiUnamFS. Esta función es llamada por el sistema de archivos FUSE cuando se realiza una operación para obtener información sobre un archivo o directorio, como cuando se utiliza el comando ls o se consulta la información del archivo en el sistema.
+.Python
+----
+def getattr(self, path, fh=None):
+    inodo = self._existe(path)
+    if path == "/":
+        ahora = datetime.now()
+        return dict(
+            st_mode=(stat.S_IRWXU|stat.S_IRWXG|stat.S_IRWXO|stat.S_IFDIR), # Todos los permisos, como en ntfs
+            st_ctime=time.mktime(ahora.timetuple()),
+            st_mtime=time.mktime(ahora.timetuple()),
+            st_atime=time.mktime(ahora.timetuple()),
+            st_nlink=2,
+            st_gid=os.getgid(),
+            st_uid=os.getuid()
+        )
+    elif inodo == None:
+        raise FuseOSError(errno.ENOENT)
+    else:
+        return dict(
+            st_atime=time.mktime(self.entradas[inodo].fecha_modificacion.timetuple()),
+            st_ctime=time.mktime(self.entradas[inodo].fecha_creacion.timetuple()),
+            st_gid=os.getgid(),
+            st_ino=inodo,
+            st_mode=(stat.S_IRWXU|stat.S_IRWXG|stat.S_IRWXO|stat.S_IFREG), # Todos los permisos, como en ntfs
+            st_mtime=time.mktime(self.entradas[inodo].fecha_modificacion.timetuple()),
+            st_nlink=1,
+            st_size=self.entradas[inodo].tamano,
+            st_uid=os.getuid()
+        )
+----
+
+* La función comienza verificando si la path se refiere al directorio raíz ("/"). Si es así, se crea y devuelve un diccionario que representa los atributos del directorio raíz. Estos atributos incluyen el modo de archivo, la hora de creación y modificación, el número de enlaces, el grupo y el usuario propietarios.
+
+* Si la path no es el directorio raíz, se verifica si el inodo (identificador único del archivo) es nulo. Si es nulo, se levanta una excepción FuseOSError con el código de error ENOENT que indica que el archivo o directorio no existe.
+
+* Si el inodo es válido, se crea y devuelve un diccionario que representa los atributos del archivo. Estos atributos incluyen la hora de acceso, creación y modificación, el grupo y el usuario propietarios, el modo de archivo, el número de enlaces, el tamaño del archivo y el identificador único del archivo (st_ino).
+
+=== unlink
+
+La función unlink se encarga de eliminar un archivo en el sistema de archivos FiUnamFS. A continuación, se proporciona una explicación detallada:
+.Python
+----
+def unlink(self, path):
+    inodo = self._existe(path)
+    del self.entradas[inodo]
+    self.entradas_vacias.add(inodo)
+    self.imagen.seek(self.cluster + 64 * inodo)
+    self.imagen.write("/..............\0\0\0\0\0\0\0\0\0000000000000000000000000000000\0\0\0\0\0\0\0\0\0\0\0\0".encode("us-ascii"))
+----
+* inodo = self._existe(path): Obtiene el identificador único del archivo (inodo) correspondiente a la ruta especificada.
+
+*  del self.entradas[inodo]: Elimina la entrada del archivo del directorio.
+
+* self.entradas_vacias.add(inodo): Agrega el identificador del inodo al conjunto de inodos vacíos, indicando que ahora está disponible para ser utilizado por nuevos archivos.
+
+* self.imagen.seek(self.cluster + 64 * inodo): Posiciona el puntero en el inicio del bloque que contiene la información del archivo en el disco.
+
+    * self.imagen.write("/..............\0\0\0\0\0\0\0\0\0000000000000000000000000000000\0\0\0\0\0\0\0\0\0\0\0\0".encode("us-ascii")): Escribe una cadena especial ("/..............") y rellena el resto del bloque con ceros. Esto indica que el espacio del archivo ahora está disponible para ser utilizado.
+
+=== symlink
+
+La función symlink está marcada como no implementada y genera una excepción NotImplementedError(). Esta función generalmente se utilizaría para crear un enlace simbólico, pero en este caso no se ha implementado.
+.Python
+----
+def symlink(self, name, target):
+    raise NotImplementedError()
+----
+
+=== rename
+
+La función rename se encarga de cambiar el nombre de un archivo en el sistema de archivos FiUnamFS.
+.Python
+----
+def rename(self, old, new):
+    inodo = self._existe(old)
+    inodo_n = self._existe(new)
+    if new.startswith("/"):
+        new = new[1:]
+    if inodo_n:
+        raise OSError(new)
+    elif len(new) > 14:
+        raise NameTooLargeExc(new)
+    else:
+        self.entradas[inodo].nombre = new
+        self.imagen.seek(self.cluster + 64 * inodo + 1)
+        self.imagen.write(new.ljust(14, " ").encode("us-ascii"))
+----
+* inodo = self._existe(old): Obtiene el identificador único del archivo (inodo) correspondiente al antiguo nombre.
+
+* inodo_n = self._existe(new): Obtiene el identificador único del archivo correspondiente al nuevo nombre.
+
+* if new.startswith("/"): Verifica si el nuevo nombre comienza con "/", y si es así, elimina el carácter "/" para evitar problemas de formato.
+
+* if inodo_n: raise OSError(new): Si ya existe un archivo con el nuevo nombre, genera una excepción indicando que el nuevo nombre ya está en uso.
+
+* elif len(new) > 14: raise NameTooLargeExc(new): Si el nuevo nombre es demasiado largo (más de 14 caracteres), genera una excepción NameTooLargeExc.
+
+* else: ...: Si no hay conflictos, actualiza el nombre del archivo en el sistema y en el disco.
+
+=== utimens
+
+La función utimens actualiza los tiempos de acceso y modificación de un archivo en el sistema de archivos FiUnamFS
+.Python
+----
+def utimens(self, path, times=None):
+    inodo = self._existe(path)
+    now = datetime.now()
+    if times:
+        mtime = datetime.utcfromtimestamp(times[0])
+    else:
+        mtime = now
+    self.entradas[inodo].fecha_modificacion = mtime
+    self.imagen.seek(self.cluster + 64 * inodo)
+    self.imagen.write(self.entradas[inodo].tobytes())
+----
+== Contacto
+
+Para obtener más información, ponte en contacto con nosotros nuestros correos: Cruz Emilio <emilio.cruz.vargas123@gmail.com>, Giovanni Garciliano <rapunzel@disroot.org>.
+
+== Licencia
+
+Este proyecto está bajo la licencia [GPLv3].
