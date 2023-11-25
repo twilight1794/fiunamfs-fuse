@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import errno
+import stat
 import time
 from datetime import datetime
 from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn
@@ -90,10 +91,12 @@ class FiUnamFS(LoggingMixIn, Operations):
 
     def _existe(self, f: str):
         if f.startswith("/"):
-            n = f[:1]
+            n = f[1:]
         else:
             n = f
+        print("Buscando ", n)
         for k, v in self.entradas.items():
+            print("Archivo ", v.nombre)
             if v.nombre == n:
                 return k
         return None
@@ -150,26 +153,35 @@ class FiUnamFS(LoggingMixIn, Operations):
     def chown(self, path, uid, gid):
         raise NotImplementedError()
 
-#    def getattr(self, path, fh=None):
-#        inodo = self._existe(path)
-#        if not inodo:
-#            raise FuseOSError(errno.ENOENT)
-#        return dict(
-#            st_atime=time.mktime(self.entradas[self._existe(path)].fecha_modificacion.timetuple()),
-#            st_ctime=time.mktime(self.entradas[self._existe(path)].fecha_creacion.timetuple()),
-#            st_gid=os.getgid(),
-#            st_ino=self._existe(path),
-#            st_mode=0o100666,
-#            st_mtime=time.mktime(self.entradas[self._existe(path)].fecha_modificacion.timetuple()),
-#            st_nlink=1,
-#            st_size=0,#self.entradas[self._existe(path)].tamano,
-#            st_uid=os.getuid()
-#        )
+    def getattr(self, path, fh=None):
+        inodo = self._existe(path)
+        if path == "/":
+            ahora = datetime.now()
+            return dict(
+                st_mode=(stat.S_IFDIR | 0o755),
+                st_ctime=time.mktime(ahora.timetuple()),
+                st_mtime=time.mktime(ahora.timetuple()),
+                st_atime=time.mktime(ahora.timetuple()),
+                st_nlink=2
+            )
+        elif inodo == None:
+            raise FuseOSError(errno.ENOENT)
+        else:
+            return dict(
+                st_atime=time.mktime(self.entradas[inodo].fecha_modificacion.timetuple()),
+                st_ctime=time.mktime(self.entradas[inodo].fecha_creacion.timetuple()),
+                st_gid=os.getgid(),
+                st_ino=inodo,
+                st_mode=(stat.S_IFREG| 666),
+                st_mtime=time.mktime(self.entradas[inodo].fecha_modificacion.timetuple()),
+                st_nlink=1,
+                st_size=self.entradas[inodo].tamano,
+                st_uid=os.getuid()
+        )
 
     def readdir(self, path, fh):
         lista = [ ".", ".." ]
         for e in self.entradas.values():
-            print("readdir", e.nombre)
             lista.append(e.nombre)
         return lista
 
