@@ -2,8 +2,8 @@
 
 import os
 import sys
-import errno
-
+#import errno
+from datetime import datetime
 from fusepy import FUSE, FuseOSError, Operations, fuse_get_context
 
 def btoi(b):
@@ -37,38 +37,57 @@ class UnsupportedVersionExc(Exception):
     """
     c = 2
 
+class FiUnamArchivo:
+    def __init__(self, b):
+        nombre = b[1:15].decode(encoding="us-ascii").strip()
+        tamano = btoi(b[16:20]) # NOTE: 4 o 3 bytes
+        cluster_ini = btoi(b[20:24)] # Idem
+        fecha_creacion = datetime.strptime(b[24:38].decode(), "%Y%m%d%H%M%S")
+        fecha_modificacion = datetime.strptime(b[38:52].decode(), "%Y%m%d%H%M%S")
+
 class FiUnamFS(Operations):
     etiqueta = ""
     cluster = 1024
     t_dir = 0
     t_unidad = 0
+    entradas = {}
+    entradas_vacias = set()
 
     def __init__(self, f: str):
         self.imagen = open(f, 'rb+')
 
         # Firma
-        tmp = imagen.read(8)
-        if not tmp == b"FiUnamFS":
+        if not self.imagen.read(8) == b"FiUnamFS":
             raise NotFiUnamPartitionExc()
 
         # Version
-        imagen.seek(10)
-        tmp = imagen.read(4)
-        if not tmp == b"24.1":
+        self.imagen.seek(10)
+        if not self.imagen.read(4) == b"24.1":
             raise UnsupportedVersionExc()
 
         # Etiqueta
-        imagen.seek(20)
-        self.etiqueta = imagen.read(19)
+        self.imagen.seek(20)
+        self.etiqueta = self.imagen.read(19)
 
-        # Cluster
-        imagen.seek(40)
-        self.cluster = btoi(imagen.read(4))
+        # Tamaño de cluster
+        self.imagen.seek(40)
+        self.cluster = btoi(self.imagen.read(4))
 
-        # Tamano de directorio
-        imagen.seek(45)
-        self.t_dir = btoi(imagen.read(4))
+        # Tamaño de directorio
+        self.imagen.seek(45)
+        self.t_dir = btoi(self.imagen.read(4))
 
-        # Tamano de unidad
-        imagen.seek(50)
-        self.t_unidad = btoi(imagen.read(42)
+        # Tamaño de unidad
+        self.imagen.seek(50)
+        self.t_unidad = btoi(self.imagen.read(42))
+
+        # Directorio
+        self.imagen.seek(self.cluster)
+        for i in range(self.cluster*self.t_dir/64):
+            raw_entrada = self.imagen.read(64)
+
+            # Tipo de nodo
+            if raw_entrada[0] == 45: # Es un archivo
+                self.entradas[i] = FiUnamArchivo(raw_entrada)
+            elif raw_entrada[0] == 47: # Es una entrada vacía
+                self.entradas_vacias.add(i)
