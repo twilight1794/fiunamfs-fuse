@@ -69,9 +69,13 @@ class FiUnamArchivo:
             self.fecha_modificacion = datetime.now()
 
     def tobytes(self):
+        """
+        Genera el array de bytes a escribir en disco para una entrada del directorio
+        """
         ba = bytearray()
         ba.append(45)
         ba.extend(self.nombre.ljust(14).encode("us-ascii"))
+        ba.append(0)
         ba.extend(itob(self.tamano)[:3])
         ba.append(0)
         ba.extend(itob(self.cluster_ini)[:3])
