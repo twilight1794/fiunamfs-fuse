@@ -105,6 +105,7 @@ class FiUnamFS(LoggingMixIn, Operations):
         """
         Si existe el archivo con el nombre proporcionado, devuelve el índice de su entrada en el directorio
         """
+        # No queremos los archivos con / al inicio
         if f.startswith("/"):
             n = f[1:]
         else:
@@ -214,7 +215,6 @@ class FiUnamFS(LoggingMixIn, Operations):
         )
 
     def readdir(self, path, fh):
-        print(self.clusters_ocupados)
         lista = [ ".", ".." ]
         for e in self.entradas.values():
             lista.append(e.nombre)
@@ -286,9 +286,7 @@ class FiUnamFS(LoggingMixIn, Operations):
         if len(self.entradas_vacias):
             inodo_n = min(list(self.entradas_vacias))
             self.entradas_vacias.remove(inodo_n)
-            cluster_ini = self._reservar(1)
-            print(cluster_ini)
-            self.entradas[inodo_n] = FiUnamArchivo((path[1:], cluster_ini))
+            self.entradas[inodo_n] = FiUnamArchivo((path[1:], self._reservar(1)))
             self.imagen.seek(self.cluster+64*inodo_n)
             self.imagen.write(self.entradas[inodo_n].tobytes())
             self.descriptores.append(inodo_n)
