@@ -296,16 +296,18 @@ class FiUnamFS(LoggingMixIn, Operations):
 
     def read(self, path, length, offset, fh):
         inodo = self._existe(path)
-        print(inodo, 1)
         self.imagen.seek(self.entradas[inodo].cluster_ini * self.cluster + (offset or 0))
-        print(inodo, 2)
         return self.imagen.read(length or self.entradas[inodo].tamano)
 
     def write(self, path, buf, offset, fh):
         inodo = self._existe(path)
+        # Escribir en archivo
         self.imagen.seek(self.entradas[inodo].cluster_ini * self.cluster + (offset or 0))
         self.imagen.write(buf)
-        self.entradas[inodo].tamano =+ len(buf) + (offset or 0)
+        self.entradas[inodo].tamano = len(buf) + (offset or 0)
+        # Escribir en directorio
+        self.imagen.seek(self.cluster+64*inodo)
+        self.imagen.write(self.entradas[inodo].tobytes())
         return len(buf)
 
     def truncate(self, path, length, fh=None):
