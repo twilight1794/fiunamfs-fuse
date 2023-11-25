@@ -202,20 +202,25 @@ class FiUnamFS(LoggingMixIn, Operations):
         inodo = self._existe(path)
         del self.entradas[inodo]
         self.entradas_vacias.add(inodo)
-        # Escribir en la imagen
+        self.imagen.seek(self.cluster + 64 * inodo)
+        self.imagen.write("/..............\0\0\0\0\0\0\0\0\0000000000000000000000000000000\0\0\0\0\0\0\0\0\0\0\0\0".encode("us-ascii"))
 
     def symlink(self, name, target):
         raise NotImplementedError()
 
     def rename(self, old, new):
-        inodo = self._existe(new)
-        if inodo:
+        inodo = self._existe(old)
+        inodo_n = self._existe(new)
+        if new.startswith("/"):
+            new = new[1:]
+        if inodo_n:
             raise OSError(new)
         elif len(new)>14:
-            raise NameTooLargeExc()
+            raise NameTooLargeExc(new)
         else:
             self.entradas[inodo].nombre = new
-            # Escribir en la imagen
+            self.imagen.seek(self.cluster + 64 * inodo + 1)
+            self.imagen.write(new.ljust(14, " ").encode("us-ascii"))
 
     def link(self, target, name):
         raise NotImplementedError()
@@ -274,7 +279,10 @@ class FiUnamFS(LoggingMixIn, Operations):
 
     def release(self, path, fh):
         inodo = self._existe(path)
-        self.descriptores.remove(inodo)
+        try:
+            self.descriptores.remove(inodo)
+        except ValueError:
+            pass
 
     def fsync(self, path, fdatasync, fh):
         pass # No implementado, los cambios se realizan inmmediatamente
