@@ -5,6 +5,7 @@ import os
 import sys
 import errno
 import stat
+import math
 import time
 from datetime import datetime
 from fusepy import FUSE, FuseOSError, Operations, LoggingMixIn
@@ -54,6 +55,9 @@ class NameTooLargeExc(Exception):
     """
 
 class FiUnamArchivo:
+    """
+    Entrada en el directorio
+    """
     def __init__(self, b):
         if type(b) == bytes:
             self.nombre = b[1:15].decode(encoding="us-ascii").strip()
@@ -85,15 +89,22 @@ class FiUnamArchivo:
         return bytes(ba)
 
 class FiUnamFS(LoggingMixIn, Operations):
+    """
+    Módulo de FUSE para FiUnamFS
+    """
     etiqueta = ""
     cluster = 1024
-    t_dir = 0
-    t_unidad = 0
+    tam_directorio = 0
+    tam_fs = 0
     entradas = {}
     entradas_vacias = set()
+    clusters_ocupados = set()
     descriptores = []
 
     def _existe(self, f: str):
+        """
+        Si existe el archivo con el nombre proporcionado, devuelve el índice de su entrada en el directorio
+        """
         if f.startswith("/"):
             n = f[1:]
         else:
@@ -101,6 +112,21 @@ class FiUnamFS(LoggingMixIn, Operations):
         for k, v in self.entradas.items():
             if v.nombre == n:
                 return k
+        return None
+
+    def _reservar(self, tam: int):
+        """
+        Encuentra un espacio del tamaño adecuado para almacenar un archivo
+        """
+        necesarios = math.ceil(tam/self.cluster)
+        c = 1 # Contador de encontradas
+        for i in range(self.tam_directorio + 1, self.tam_fs + 1):
+            if i in self.clusters_ocupados:
+                c = 1
+                continue
+            if c == necesarios:
+                return i - (c - 1)
+            c += 1
         return None
 
     def __init__(self, f: str):
@@ -128,24 +154,28 @@ class FiUnamFS(LoggingMixIn, Operations):
 
         # Tamaño de directorio
         self.imagen.seek(45)
-        self.t_dir = btoi(self.imagen.read(4))
+        self.tam_directorio = btoi(self.imagen.read(4))
 
         # Tamaño de unidad
         self.imagen.seek(50)
-        self.t_unidad = btoi(self.imagen.read(4))
+        self.tam_fs = btoi(self.imagen.read(4))
 
         # Directorio
         self.imagen.seek(self.cluster)
-        for i in range(self.cluster*self.t_dir//64):
+        for i in range(self.cluster*self.tam_directorio//64):
             raw_entrada = self.imagen.read(64)
 
             # Tipo de nodo
             if raw_entrada[0] == 45: # Es un archivo
                 self.entradas[i] = FiUnamArchivo(raw_entrada)
+                # Marcar clusters ocupados
+                ci = self.entradas[i].cluster_ini # Cluster inicial
+                self.clusters_ocupados |= set(range(ci, ci+math.ceil(self.entradas[i].tamano/self.cluster)))
+
             elif raw_entrada[0] == 47: # Es una entrada vacía
                 self.entradas_vacias.add(i)
 
-    # Sistema de archivos
+    # Acciones sobre el sistema de archivos
     def access(self, path, mode):
         return bool(self._existe(path))
 
@@ -184,6 +214,7 @@ class FiUnamFS(LoggingMixIn, Operations):
         )
 
     def readdir(self, path, fh):
+        print(self.clusters_ocupados)
         lista = [ ".", ".." ]
         for e in self.entradas.values():
             lista.append(e.nombre)
@@ -202,7 +233,7 @@ class FiUnamFS(LoggingMixIn, Operations):
         raise NotImplementedError()
 
     def statfs(self, path):
-        return dict(f_bsize=self.cluster, f_blocks=self.t_unidad, f_bavail=len(self.entradas_vacias))
+        return dict(f_bsize=self.cluster, f_blocks=self.tam_fs, f_bavail=len(self.entradas_vacias))
 
     def unlink(self, path):
         inodo = self._existe(path)
@@ -242,7 +273,7 @@ class FiUnamFS(LoggingMixIn, Operations):
         self.imagen.seek(self.cluster+64*inodo)
         self.imagen.write(self.entradas[inodo].tobytes())
 
-    # Archivos
+    # Acciones sobre archivos
     def open(self, path, flags):
         inodo = self._existe(path)
         try:
@@ -255,7 +286,9 @@ class FiUnamFS(LoggingMixIn, Operations):
         if len(self.entradas_vacias):
             inodo_n = min(list(self.entradas_vacias))
             self.entradas_vacias.remove(inodo_n)
-            self.entradas[inodo_n] = FiUnamArchivo((path[1:], inodo_n))
+            cluster_ini = self._reservar(1)
+            print(cluster_ini)
+            self.entradas[inodo_n] = FiUnamArchivo((path[1:], cluster_ini))
             self.imagen.seek(self.cluster+64*inodo_n)
             self.imagen.write(self.entradas[inodo_n].tobytes())
             self.descriptores.append(inodo_n)
