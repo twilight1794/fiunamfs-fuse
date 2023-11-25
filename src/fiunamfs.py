@@ -27,7 +27,7 @@ def itob(i):
 
 class NotFiUnamPartitionExc(Exception):
     """
-    La partición no contiene la firma, no es una partición FiUnamFS
+    La imagen no contiene la firma, no es una partición FiUnamFS
     """
     c = 1
 
@@ -37,13 +37,19 @@ class UnsupportedVersionExc(Exception):
     """
     c = 2
 
+class TruncatedImageExc(Exception):
+    """
+    La imagen no tiene el tamaño mínimo para ser una imagen válida
+    """
+    c = 3
+
 class FiUnamArchivo:
     def __init__(self, b):
-        nombre = b[1:15].decode(encoding="us-ascii").strip()
-        tamano = btoi(b[16:20]) # NOTE: 4 o 3 bytes
-        cluster_ini = btoi(b[20:24)] # Idem
-        fecha_creacion = datetime.strptime(b[24:38].decode(), "%Y%m%d%H%M%S")
-        fecha_modificacion = datetime.strptime(b[38:52].decode(), "%Y%m%d%H%M%S")
+        self.nombre = b[1:15].decode(encoding="us-ascii").strip()
+        self.tamano = btoi(b[16:20]) # NOTE: 4 o 3 bytes
+        self.cluster_ini = btoi(b[20:24]) # Idem
+        self.fecha_creacion = datetime.strptime(b[24:38].decode(), "%Y%m%d%H%M%S")
+        self.fecha_modificacion = datetime.strptime(b[38:52].decode(), "%Y%m%d%H%M%S")
 
 class FiUnamFS(Operations):
     etiqueta = ""
@@ -54,6 +60,9 @@ class FiUnamFS(Operations):
     entradas_vacias = set()
 
     def __init__(self, f: str):
+        if os.path.getsize(f) < 54:
+            raise TruncatedImageExc()
+
         self.imagen = open(f, 'rb+')
 
         # Firma
@@ -79,11 +88,11 @@ class FiUnamFS(Operations):
 
         # Tamaño de unidad
         self.imagen.seek(50)
-        self.t_unidad = btoi(self.imagen.read(42))
+        self.t_unidad = btoi(self.imagen.read(4))
 
         # Directorio
         self.imagen.seek(self.cluster)
-        for i in range(self.cluster*self.t_dir/64):
+        for i in range(self.cluster*self.t_dir//64):
             raw_entrada = self.imagen.read(64)
 
             # Tipo de nodo
