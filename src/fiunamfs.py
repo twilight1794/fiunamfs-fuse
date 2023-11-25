@@ -3,7 +3,6 @@
 import os
 import sys
 import errno
-import struct
 
 from fusepy import FUSE, FuseOSError, Operations, fuse_get_context
 
@@ -40,11 +39,36 @@ class UnsupportedVersionExc(Exception):
 
 class FiUnamFS(Operations):
     etiqueta = ""
-    
-    bl = open('fiunamfs.img', 'r+')
-    sb = bl.read(1024)
-    if not sb[:8] == b"FiUnamFS":
-        raise NotFiUnamPartitionExc()
-    if not sb[10:14] == b"24.1":
-        raise UnsupportedVersionExc()
-    etiqueta = sb[20:39]
+    cluster = 1024
+    t_dir = 0
+    t_unidad = 0
+
+    def __init__(self, f: str):
+        self.imagen = open(f, 'rb+')
+
+        # Firma
+        tmp = imagen.read(8)
+        if not tmp == b"FiUnamFS":
+            raise NotFiUnamPartitionExc()
+
+        # Version
+        imagen.seek(10)
+        tmp = imagen.read(4)
+        if not tmp == b"24.1":
+            raise UnsupportedVersionExc()
+
+        # Etiqueta
+        imagen.seek(20)
+        self.etiqueta = imagen.read(19)
+
+        # Cluster
+        imagen.seek(40)
+        self.cluster = btoi(imagen.read(4))
+
+        # Tamano de directorio
+        imagen.seek(45)
+        self.t_dir = btoi(imagen.read(4))
+
+        # Tamano de unidad
+        imagen.seek(50)
+        self.t_unidad = btoi(imagen.read(42)
